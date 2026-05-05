@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@heroui/react": "^3.0.3",
+    "@supabase/supabase-js": "^2.105.3",
     "@tailwindcss/vite": "^4.2.4",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.11.0",
