@@ -17,7 +17,10 @@ const supabase_connect = createClient(supabase_url, service_key);
 
 const PORT = 5000;
 
+//register user to supabase 
+
 app.post('/api/register', async (req, res) => {
+
     const { userName, email, password } = req.body;
   
     if (!userName || !email || !password) {
