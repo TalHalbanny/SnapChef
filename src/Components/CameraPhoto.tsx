@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Card } from "@heroui/react";
 import { Camera } from "lucide-react";
-
-
-//
+import { useLanguage } from "../i18n/LanguageContext";
 
 type CameraCaptureProps = {
   onPhotoTaken?: (photoDataUrl: string) => void;
@@ -11,27 +8,24 @@ type CameraCaptureProps = {
 
 const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastCapturedImageRef = useRef<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-
-
-  //start camera fucnction
+  const { t } = useLanguage();
 
   const stopStream = () => {
     if (!stream) return;
-    stream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+    stream.getTracks().forEach((track) => track.stop());
     setStream(null);
   };
 
   useEffect(() => {
     return () => {
-      stream?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      stream?.getTracks().forEach((track) => track.stop());
     };
   }, [stream]);
 
   const startCamera = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      alert("Camera is not available. Open this app in Chrome/Safari over HTTPS.");
+      alert(t("cameraNotAvailable"));
       return;
     }
 
@@ -48,63 +42,47 @@ const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
       const error = err as DOMException;
 
       if (error.name === "NotAllowedError") {
-        alert(
-          "Camera permission was denied. Allow camera access in your browser settings and try again.",
-        );
+        alert(t("cameraDenied"));
         return;
       }
-
       if (error.name === "NotFoundError") {
-        alert("No camera found on this device.");
+        alert(t("noCamera"));
         return;
       }
-
       if (error.name === "NotReadableError") {
-        alert("Camera is currently in use by another app. Close it and try again.");
+        alert(t("cameraInUse"));
         return;
       }
-
       if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
-        alert("On phones, camera access usually requires HTTPS. Open the app with an HTTPS URL.");
+        alert(t("httpsRequired"));
         return;
       }
-
-      alert(`Could not access camera: ${error.name}`);
+      alert(`${t("cameraError")}: ${error.name}`);
     }
   };
-
-  //take picture function
 
   const takePhoto = () => {
     const video = videoRef.current;
     if (!video || !stream) return;
 
-    const canvas = document.createElement('canvas');
+    const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
-    const context = canvas.getContext('2d');
+
+    const context = canvas.getContext("2d");
     if (!context) return;
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    const dataUrl = canvas.toDataURL('image/png');
-    lastCapturedImageRef.current = dataUrl;
-    
-  
     stopStream();
-
-    if (onPhotoTaken) onPhotoTaken(dataUrl);
+    onPhotoTaken?.(canvas.toDataURL("image/png"));
   };
 
   const isIdle = !stream;
 
   return (
-    <Card
-      className={`p-4 flex flex-col items-center gap-4 ${
-        isIdle
-          ? "cursor-pointer shadow-[0_0_28px_rgba(156,171,132,0.85)]"
-          : ""
+    <div
+      className={`snap-card flex flex-col items-center gap-4 p-5 transition-shadow ${
+        isIdle ? "cursor-pointer hover:shadow-[var(--snap-shadow-lg)]" : ""
       }`}
       onClick={isIdle ? startCamera : undefined}
       role={isIdle ? "button" : undefined}
@@ -120,26 +98,38 @@ const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
           : undefined
       }
     >
-      <>
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          playsInline 
-          style={{ width: '100%', borderRadius: '12px', display: stream ? 'block' : 'none' }} 
-        />
-        {!stream ? (
-          <div className="flex items-center gap-3 text-[#9CAB84]" aria-label="Take Ingredients Photo">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="w-full rounded-xl"
+        style={{ display: stream ? "block" : "none" }}
+      />
+
+      {!stream ? (
+        <div
+          className="flex flex-col items-center gap-3 py-6 text-[var(--snap-text-muted)]"
+          aria-label={t("takeIngredientsPhoto")}
+        >
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/70 text-[var(--snap-accent-mid)]">
             <Camera size={32} />
-            <p>Take Ingredients Photo</p>
           </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <Button variant="secondary" onClick={takePhoto}>Take Photo</Button>
-            <Button variant="outline" onClick={stopStream}>Cancel</Button>
-          </div>
-        )}
-      </>
-    </Card>
+          <p className="text-base font-medium text-[var(--snap-text)]">{t("takeIngredientsPhoto")}</p>
+        </div>
+      ) : (
+        <div
+          className="flex w-full flex-wrap items-center justify-center gap-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onClick={takePhoto} className="snap-btn-primary !w-auto min-w-[8rem]">
+            {t("takePhoto")}
+          </button>
+          <button type="button" onClick={stopStream} className="snap-btn-secondary">
+            {t("cancel")}
+          </button>
+        </div>
+      )}
+    </div>
   );
 };
 
