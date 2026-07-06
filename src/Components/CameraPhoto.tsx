@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera } from "lucide-react";
+import { Camera, Upload } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
 
 type CameraCaptureProps = {
@@ -8,6 +8,7 @@ type CameraCaptureProps = {
 
 const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const { t } = useLanguage();
 
@@ -77,27 +78,35 @@ const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
     onPhotoTaken?.(canvas.toDataURL("image/png"));
   };
 
-  const isIdle = !stream;
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert(t("invalidImageFile"));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        onPhotoTaken?.(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
-    <div
-      className={`snap-card flex flex-col items-center gap-4 p-5 transition-shadow ${
-        isIdle ? "cursor-pointer hover:shadow-[var(--snap-shadow-lg)]" : ""
-      }`}
-      onClick={isIdle ? startCamera : undefined}
-      role={isIdle ? "button" : undefined}
-      tabIndex={isIdle ? 0 : undefined}
-      onKeyDown={
-        isIdle
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                void startCamera();
-              }
-            }
-          : undefined
-      }
-    >
+    <div className="snap-card flex flex-col items-center gap-4 p-5">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileSelect}
+      />
+
       <video
         ref={videoRef}
         autoPlay
@@ -107,20 +116,34 @@ const CameraCapture = ({ onPhotoTaken }: CameraCaptureProps) => {
       />
 
       {!stream ? (
-        <div
-          className="flex flex-col items-center gap-3 py-6 text-[var(--snap-text-muted)]"
-          aria-label={t("takeIngredientsPhoto")}
-        >
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/70 text-[var(--snap-accent-mid)]">
-            <Camera size={32} />
+        <div className="flex w-full flex-col items-center gap-4 py-4">
+          <div
+            className="flex flex-col items-center gap-3 text-[var(--snap-text-muted)]"
+            aria-label={t("takeIngredientsPhoto")}
+          >
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/70 text-[var(--snap-accent-mid)]">
+              <Camera size={32} />
+            </div>
+            <p className="text-base font-medium text-[var(--snap-text)]">{t("takeIngredientsPhoto")}</p>
           </div>
-          <p className="text-base font-medium text-[var(--snap-text)]">{t("takeIngredientsPhoto")}</p>
+
+          <div className="flex w-full flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={() => void startCamera()} className="snap-btn-primary flex-1">
+              <Camera size={18} />
+              {t("takePhoto")}
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="snap-btn-secondary flex-1"
+            >
+              <Upload size={18} />
+              {t("uploadPhoto")}
+            </button>
+          </div>
         </div>
       ) : (
-        <div
-          className="flex w-full flex-wrap items-center justify-center gap-3"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="flex w-full flex-wrap items-center justify-center gap-3">
           <button type="button" onClick={takePhoto} className="snap-btn-primary !w-auto min-w-[8rem]">
             {t("takePhoto")}
           </button>

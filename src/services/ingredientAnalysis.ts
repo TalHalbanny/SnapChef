@@ -1,8 +1,75 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import type { Language } from "../i18n/translations";
 import type { AnalysisResult, RecipeOption, Ingredient } from "../types/recipe";
 
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_FLASH_3_KEY || "");
+const DEFAULT_MODEL = "gemini-2.5-flash";
+
+const FALLBACK_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+] as const;
+
+function getApiKey() {
+  return import.meta.env.VITE_GEMINI_FLASH_3_KEY?.trim() || "";
+}
+
+function getModelName() {
+  return import.meta.env.VITE_GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+}
+
+function getModelsToTry() {
+  const preferred = getModelName();
+  const ordered = [preferred, ...FALLBACK_MODELS.filter((model) => model !== preferred)];
+  return [...new Set(ordered)];
+}
+
+function createModel(modelName: string) {
+  const apiKey = getApiKey();
+  if (!apiKey) return null;
+
+  return new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
+  });
+}
+
+function isQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
+}
+
+export function isGeminiQuotaError(error: unknown) {
+  return isQuotaError(error);
+}
+
+async function generateContentWithFallback(content: string | Part[]) {
+  const models = getModelsToTry();
+  let lastError: unknown;
+
+  for (const modelName of models) {
+    const model = createModel(modelName);
+    if (!model) return null;
+
+    try {
+      return await model.generateContent(content);
+    } catch (error) {
+      lastError = error;
+      if (!isQuotaError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("All Gemini models failed");
+}
+
+function getImageMimeType(imageDataUrl: string) {
+  const match = imageDataUrl.match(/^data:([^;]+);/);
+  return match?.[1] ?? "image/jpeg";
+}
 
 function buildAnalysisPrompt(language: Language): string {
   const languageInstruction =
@@ -12,7 +79,7 @@ function buildAnalysisPrompt(language: Language): string {
 
   return `Analyze the food ingredients visible in this image.
 
-Return ONLY valid JSON (no markdown) with this exact structure:
+Return JSON with this exact structure:
 {
   "ingredients": [
     { "name": "ingredient name", "quantity": "estimated amount with unit" }
@@ -58,7 +125,7 @@ ${ingredientList}
 
 Suggest exactly 3 different recipes using these ingredients with the listed amounts.
 
-Return ONLY valid JSON (no markdown) with this exact structure:
+Return JSON with this exact structure:
 {
   "recipes": [
     {
@@ -84,9 +151,16 @@ Rules:
 - Nutrition values are per serving (numbers only, no units in values).`;
 }
 
-function parseRecipesResponse(text: string): Omit<RecipeOption, "id">[] {
+function parseJsonResponse<T>(text: string): T {
   const cleanJsonText = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(cleanJsonText);
+  return JSON.parse(cleanJsonText) as T;
+}
+
+function parseRecipesResponse(text: string): Omit<RecipeOption, "id">[] {
+  const parsed = parseJsonResponse<{ recipes: Omit<RecipeOption, "id">[] }>(text);
+  if (!Array.isArray(parsed.recipes)) {
+    throw new Error("Invalid recipes response from Gemini");
+  }
   return parsed.recipes;
 }
 
@@ -98,8 +172,11 @@ function addRecipeIds(recipes: Omit<RecipeOption, "id">[]): RecipeOption[] {
 }
 
 function parseAnalysisResponse(text: string): Omit<AnalysisResult, "recipes"> & { recipes: Omit<RecipeOption, "id">[] } {
-  const cleanJsonText = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(cleanJsonText);
+  const parsed = parseJsonResponse<Omit<AnalysisResult, "recipes"> & { recipes: Omit<RecipeOption, "id">[] }>(text);
+  if (!Array.isArray(parsed.ingredients) || !Array.isArray(parsed.recipes)) {
+    throw new Error("Invalid analysis response from Gemini");
+  }
+  return parsed;
 }
 
 function withIngredientIds(ingredients: Omit<Ingredient, "id">[]): Ingredient[] {
@@ -147,7 +224,7 @@ export function getMockAnalysis(language: Language): AnalysisResult {
         {
           id: "mock-2",
           title: "מקושקש עגבניות וביצים",
-          description: "מנה מהירה בסגנון אסיатי עם עגבניות עסיסיות.",
+          description: "מנה מהירה עם עגבניות עסיסיות.",
           prepTime: "15 דק'",
           servings: 2,
           steps: [
@@ -160,13 +237,13 @@ export function getMockAnalysis(language: Language): AnalysisResult {
         },
         {
           id: "mock-3",
-          title: "חביתת עגבניות מהגינה",
-          description: "חביתה אוורירית במילוי עגבניות טריות.",
+          title: "חביתת עגבניות",
+          description: "חביתה במילוי עגבניות טריות.",
           prepTime: "12 דק'",
           servings: 1,
           steps: [
             "מקציפים ביצים עד קצף.",
-            "מבשלים במחבת נון-סטיק על אש בינונית.",
+            "מבשלים במחבת על אש בינונית.",
             "מוסיפים עגבניות קצוצות וקופפים את החביתה.",
             "מגישים מיד עם טוסט.",
           ],
@@ -202,7 +279,7 @@ export function getMockAnalysis(language: Language): AnalysisResult {
       {
         id: "mock-2",
         title: "Tomato & Egg Stir-Fry",
-        description: "A quick Chinese-style scramble with juicy tomatoes.",
+        description: "A quick scramble with juicy tomatoes.",
         prepTime: "15 min",
         servings: 2,
         steps: [
@@ -216,7 +293,7 @@ export function getMockAnalysis(language: Language): AnalysisResult {
       {
         id: "mock-3",
         title: "Garden Tomato Omelette",
-        description: "Fluffy omelette filled with fresh tomatoes and herbs.",
+        description: "Fluffy omelette filled with fresh tomatoes.",
         prepTime: "12 min",
         servings: 1,
         steps: [
@@ -235,25 +312,30 @@ export async function analyzeIngredients(
   imageDataUrl: string,
   language: Language,
 ): Promise<AnalysisResult> {
-  const apiKey = import.meta.env.VITE_GEMINI_FLASH_3_KEY;
-
-  if (!apiKey) {
+  if (!getApiKey()) {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     return getMockAnalysis(language);
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   const base64Data = imageDataUrl.split(",")[1];
+  if (!base64Data) {
+    throw new Error("Invalid image data");
+  }
 
-  const result = await model.generateContent([
-    buildAnalysisPrompt(language),
+  const result = await generateContentWithFallback([
+    { text: buildAnalysisPrompt(language) },
     {
       inlineData: {
         data: base64Data,
-        mimeType: "image/png",
+        mimeType: getImageMimeType(imageDataUrl),
       },
     },
   ]);
+
+  if (!result) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return getMockAnalysis(language);
+  }
 
   const text = result.response.text();
   return withRecipeIds(parseAnalysisResponse(text));
@@ -263,9 +345,7 @@ export async function searchRecipesFromIngredients(
   ingredients: Ingredient[],
   language: Language,
 ): Promise<RecipeOption[]> {
-  const apiKey = import.meta.env.VITE_GEMINI_FLASH_3_KEY;
-
-  if (!apiKey) {
+  if (!getApiKey()) {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     return getMockAnalysis(language).recipes.map((recipe, index) => ({
       ...recipe,
@@ -273,11 +353,17 @@ export async function searchRecipesFromIngredients(
     }));
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-  const result = await model.generateContent(
+  const result = await generateContentWithFallback(
     buildRecipesFromIngredientsPrompt(ingredients, language),
   );
+
+  if (!result) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return getMockAnalysis(language).recipes.map((recipe, index) => ({
+      ...recipe,
+      id: `${Date.now()}-recipe-${index}`,
+    }));
+  }
 
   const text = result.response.text();
   return addRecipeIds(parseRecipesResponse(text));

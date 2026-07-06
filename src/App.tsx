@@ -8,7 +8,11 @@ import { PhotoPreview } from "./Components/PhotoPreview";
 import { StepIndicator } from "./Components/StepIndicator";
 import CameraPhoto from "./Components/CameraPhoto";import snapchefLogo from "./assets/snapchef_logo.png";
 import { authService } from "./auth_util";
-import { analyzeIngredients, searchRecipesFromIngredients } from "./services/ingredientAnalysis";
+import {
+  analyzeIngredients,
+  isGeminiQuotaError,
+  searchRecipesFromIngredients,
+} from "./services/ingredientAnalysis";
 import { useLanguage } from "./i18n/LanguageContext";
 import type { AnalysisResult, Ingredient } from "./types/recipe";
 
@@ -112,7 +116,12 @@ function App() {
     setIsRegistering(false);
   };
 
-  //Analyze and get recipe from Gemini Flash API
+  const getAnalysisErrorMessage = (err: unknown) => {
+    if (isGeminiQuotaError(err)) {
+      return t("quotaExceeded");
+    }
+    return err instanceof Error ? err.message : t("unknownError");
+  };
 
   const analyzeImageAndGetRecipe = async () => {
     if (!GetImage) {
@@ -129,8 +138,7 @@ function App() {
       setIngredients(result.ingredients);
     } catch (err: unknown) {
       console.error("Error analyzing image:", err);
-      const message = err instanceof Error ? err.message : t("unknownError");
-      alert(`${t("errorAnalyzing")}: ${message}`);
+      alert(`${t("errorAnalyzing")}: ${getAnalysisErrorMessage(err)}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -151,8 +159,7 @@ function App() {
       setAnalysisResult({ ingredients: validIngredients, recipes });
     } catch (err: unknown) {
       console.error("Error searching recipes:", err);
-      const message = err instanceof Error ? err.message : t("unknownError");
-      alert(`${t("errorAnalyzing")}: ${message}`);
+      alert(`${t("errorAnalyzing")}: ${getAnalysisErrorMessage(err)}`);
     } finally {
       setIsSearchingRecipes(false);
     }
