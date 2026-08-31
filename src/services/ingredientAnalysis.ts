@@ -2,12 +2,13 @@ import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import type { Language } from "../i18n/translations";
 import type { AnalysisResult, RecipeOption, Ingredient } from "../types/recipe";
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 const FALLBACK_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-2.0-flash",
+  "gemini-flash-latest",
   "gemini-2.5-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
 ] as const;
 
 function getApiKey() {
@@ -36,13 +37,32 @@ function createModel(modelName: string) {
   });
 }
 
-function isQuotaError(error: unknown) {
+function isRetryableModelError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /429|quota|RESOURCE_EXHAUSTED|404|NOT_FOUND|no longer available|not found/i.test(message);
+}
+
+export function isGeminiQuotaError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
 }
 
-export function isGeminiQuotaError(error: unknown) {
-  return isQuotaError(error);
+const REQUEST_TIMEOUT_MS = 45000;
+
+function withTimeout<T>(promise: Promise<T>, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), REQUEST_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function generateContentWithFallback(content: string | Part[]) {
@@ -54,10 +74,13 @@ async function generateContentWithFallback(content: string | Part[]) {
     if (!model) return null;
 
     try {
-      return await model.generateContent(content);
+      return await withTimeout(
+        model.generateContent(content),
+        "Gemini request timed out. Try a smaller photo and analyze again.",
+      );
     } catch (error) {
       lastError = error;
-      if (!isQuotaError(error)) {
+      if (!isRetryableModelError(error)) {
         throw error;
       }
     }
@@ -69,6 +92,23 @@ async function generateContentWithFallback(content: string | Part[]) {
 function getImageMimeType(imageDataUrl: string) {
   const match = imageDataUrl.match(/^data:([^;]+);/);
   return match?.[1] ?? "image/jpeg";
+}
+
+async function compressImageDataUrl(imageDataUrl: string, maxSize = 1280): Promise<string> {
+  const image = new Image();
+  image.src = imageDataUrl;
+  await image.decode();
+
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+
+  const context = canvas.getContext("2d");
+  if (!context) return imageDataUrl;
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 function buildAnalysisPrompt(language: Language): string {
@@ -317,7 +357,8 @@ export async function analyzeIngredients(
     return getMockAnalysis(language);
   }
 
-  const base64Data = imageDataUrl.split(",")[1];
+  const preparedImage = await compressImageDataUrl(imageDataUrl);
+  const base64Data = preparedImage.split(",")[1];
   if (!base64Data) {
     throw new Error("Invalid image data");
   }
@@ -327,7 +368,7 @@ export async function analyzeIngredients(
     {
       inlineData: {
         data: base64Data,
-        mimeType: getImageMimeType(imageDataUrl),
+        mimeType: getImageMimeType(preparedImage),
       },
     },
   ]);

@@ -1,8 +1,12 @@
-const USERS_KEY = "snapchef_prototype_users";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-interface StoredUser {
+const ADMIN_USERNAME = "admin";
+const ADMIN_PASSWORD = "admin";
+const ADMIN_EMAIL = "admin@snapchef.app";
+
+export interface AuthUser {
+  email: string;
   userName: string;
-  password: string;
 }
 
 interface RegisterParams {
@@ -12,64 +16,134 @@ interface RegisterParams {
 }
 
 interface LoginParams {
-  email: string;
+  username: string;
   password: string;
 }
 
-function getUsers(): Record<string, StoredUser> {
-  try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveUsers(users: Record<string, StoredUser>) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export interface AuthUser {
+type UserRow = {
+  username: string;
   email: string;
-  userName: string;
-}
-
-export const DEMO_USER: AuthUser = {
-  email: "demo@snapchef.app",
-  userName: "Demo Chef",
+  password: string;
 };
 
-export const authService = {
-  register: async ({ userName, email, password }: RegisterParams) => {
-    await delay(400);
+let client: SupabaseClient | null = null;
 
-    const users = getUsers();
-    if (users[email]) {
-      throw new Error("User already registered with this email");
+export function getSupabase(): SupabaseClient {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Missing Supabase configuration");
+  }
+
+  if (!client) {
+    client = createClient(supabaseUrl, supabaseAnonKey);
+  }
+
+  return client;
+}
+
+function toAuthUser(row: Pick<UserRow, "username" | "email">) {
+  return {
+    user: {
+      email: row.email,
+      user_metadata: { display_name: row.username },
+    },
+  };
+}
+
+function isDuplicateUserError(message: string) {
+  return (
+    message.includes("duplicate") ||
+    message.includes("already exists") ||
+    message.includes("unique")
+  );
+}
+
+export const authService = {
+  ensureAdminUser: async () => {
+    const supabase = getSupabase();
+    const { data: existing, error: lookupError } = await supabase
+      .from("users")
+      .select("username")
+      .eq("username", ADMIN_USERNAME)
+      .maybeSingle();
+
+    if (lookupError) {
+      throw new Error(lookupError.message);
     }
 
-    users[email] = { userName, password };
-    saveUsers(users);
+    if (existing) {
+      return;
+    }
 
-    return { user: { email, user_metadata: { display_name: userName } } };
+    const { error: insertError } = await supabase.from("users").insert({
+      username: ADMIN_USERNAME,
+      email: ADMIN_EMAIL,
+      password: ADMIN_PASSWORD,
+    });
+
+    if (insertError && !isDuplicateUserError(insertError.message)) {
+      throw new Error(insertError.message);
+    }
   },
 
-  login: async ({ email, password }: LoginParams) => {
-    await delay(400);
+  register: async ({ userName, email, password }: RegisterParams) => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        username: userName,
+        email,
+        password,
+      })
+      .select("username, email")
+      .single();
 
-    const user = getUsers()[email];
-    if (!user || user.password !== password) {
+    if (error) {
+      if (isDuplicateUserError(error.message)) {
+        throw new Error("User already registered with this email");
+      }
+      throw error;
+    }
+
+    return toAuthUser(data);
+  },
+
+  login: async ({ username, password }: LoginParams) => {
+    const supabase = getSupabase();
+    const identifier = username.trim();
+
+    const { data: byUsername, error: usernameError } = await supabase
+      .from("users")
+      .select("username, email, password")
+      .eq("username", identifier)
+      .eq("password", password)
+      .maybeSingle();
+
+    if (usernameError) {
+      throw new Error(usernameError.message);
+    }
+
+    if (byUsername) {
+      return toAuthUser(byUsername);
+    }
+
+    const { data: byEmail, error: emailError } = await supabase
+      .from("users")
+      .select("username, email, password")
+      .eq("email", identifier)
+      .eq("password", password)
+      .maybeSingle();
+
+    if (emailError) {
+      throw new Error(emailError.message);
+    }
+
+    if (!byEmail) {
       throw new Error("Invalid email or password");
     }
 
-    return { user: { email, user_metadata: { display_name: user.userName } } };
-  },
-
-  demoLogin: async (): Promise<{ user: AuthUser }> => {
-    await delay(300);
-    return { user: DEMO_USER };
+    return toAuthUser(byEmail);
   },
 };

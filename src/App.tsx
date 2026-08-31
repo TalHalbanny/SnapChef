@@ -1,24 +1,48 @@
-import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BarChart3, LogOut, Sparkles, ArrowLeft } from "lucide-react";
 import { Navbar } from "./Components/Navbar";
 import { RecipeCard } from "./Components/RecipeCard";
 import { IngredientsList } from "./Components/IngredientsList";
-import { LanguageToggle } from "./Components/LanguageToggle";
 import { PhotoPreview } from "./Components/PhotoPreview";
 import { StepIndicator } from "./Components/StepIndicator";
-import CameraPhoto from "./Components/CameraPhoto";import snapchefLogo from "./assets/snapchef_logo.png";
+import { StatisticsPage } from "./Components/StatisticsPage";
+import { RecentRecipes } from "./Components/RecentRecipes";
+import CameraPhoto from "./Components/CameraPhoto";
+import snapchefLogo from "./assets/snapchef_logo.png";
 import { authService } from "./auth_util";
 import {
   analyzeIngredients,
   isGeminiQuotaError,
   searchRecipesFromIngredients,
 } from "./services/ingredientAnalysis";
+import { logIngredientUsage } from "./services/ingredientStats";
+import {
+  fetchRecentSavedRecipes,
+  isMissingSavedRecipesTableError,
+  saveChosenRecipe,
+  type SavedRecipeRow,
+} from "./services/savedRecipes";
 import { useLanguage } from "./i18n/LanguageContext";
-import type { AnalysisResult, Ingredient } from "./types/recipe";
+import type { AnalysisResult, Ingredient, RecipeOption } from "./types/recipe";
+
+function getErrorMessage(err: unknown, fallback: string) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err && "message" in err) {
+    const message = (err as { message: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
 
 function translateAuthError(message: string, t: ReturnType<typeof useLanguage>["t"]) {
   if (message.includes("already registered")) return t("userExists");
-  if (message.includes("Invalid email")) return t("invalidCredentials");
+  if (message.includes("Invalid email") || message.includes("Invalid username")) {
+    return t("invalidCredentials");
+  }
+  if (message.includes("Missing Supabase")) return t("missingSupabaseConfig");
+  if (message.includes("row-level security") || message.includes("42501")) {
+    return t("rlsBlocked");
+  }
   return message;
 }
 
@@ -30,22 +54,43 @@ function App() {
   const [regPassword, setRegPassword] = useState("");
 
   // login states 
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginUsername, setLoginUsername] = useState("");
   const [password, setPassword] = useState("");
 
   // navigation flag states. 
   const [hasEnteredDashboard, setHasEnteredDashboard] = useState(false);
   const [currentUserName, setCurrentUserName] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false); 
-  const [showFields, setShowFields] = useState(false);
+  const [currentPage, setCurrentPage] = useState<"home" | "stats">("home");
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   const [GetImage, setImage] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSearchingRecipes, setIsSearchingRecipes] = useState(false);
+  const [recentRecipes, setRecentRecipes] = useState<SavedRecipeRow[]>([]);
+  const [choosingRecipeId, setChoosingRecipeId] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState("");
+
+  useEffect(() => {
+    if (hasEnteredDashboard) return;
+
+    authService.ensureAdminUser().catch((err: unknown) => {
+      const message = getErrorMessage(err, t("unknownError"));
+      setAuthError(translateAuthError(message, t));
+    });
+  }, [hasEnteredDashboard, t]);
+
+  useEffect(() => {
+    if (!hasEnteredDashboard || !currentUserName) return;
+
+    fetchRecentSavedRecipes(currentUserName).then(setRecentRecipes).catch((err: unknown) => {
+      console.error("Error loading saved recipes:", err);
+    });
+  }, [hasEnteredDashboard, currentUserName]);
 
   // handle register function
   const handleRegister = async (e: React.FormEvent) => {
@@ -53,6 +98,7 @@ function App() {
     if (isSubmitting) return;
 
     setIsSubmitting(true);
+    setAuthError("");
     try {
       await authService.register({
         userName: regUserName,
@@ -65,8 +111,8 @@ function App() {
       setRegEmail("");
       setRegPassword("");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("unknownError");
-      alert(translateAuthError(message, t));
+      const message = getErrorMessage(err, t("unknownError"));
+      setAuthError(translateAuthError(message, t));
     } finally {
       setIsSubmitting(false);
     }
@@ -78,29 +124,18 @@ function App() {
     if (isSubmitting) return;
 
     setIsSubmitting(true);
+    setAuthError("");
     try {
       const { user } = await authService.login({
-        email: loginEmail,
+        username: loginUsername,
         password: password
       });
       setCurrentUserName(user.user_metadata.display_name);
+      setCurrentPage("home");
       setHasEnteredDashboard(true);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("unknownError");
-      alert(`${t("loginFailed")}: ${translateAuthError(message, t)}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDemoLogin = async () => {
-    if (isSubmitting) return;
-
-    setIsSubmitting(true);
-    try {
-      await authService.demoLogin();
-      setCurrentUserName(t("demoUserName"));
-      setHasEnteredDashboard(true);
+      const message = getErrorMessage(err, t("unknownError"));
+      setAuthError(`${t("loginFailed")}: ${translateAuthError(message, t)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -109,10 +144,11 @@ function App() {
   const handleLogout = () => {
     setHasEnteredDashboard(false);
     setCurrentUserName("");
+    setCurrentPage("home");
     setImage(null);
     setAnalysisResult(null);
     setIngredients([]);
-    setShowFields(false);
+    setRecentRecipes([]);
     setIsRegistering(false);
   };
 
@@ -123,6 +159,35 @@ function App() {
     return err instanceof Error ? err.message : t("unknownError");
   };
 
+  const handleChooseRecipe = async (recipe: RecipeOption) => {
+    if (choosingRecipeId) return;
+
+    const usedIngredients = ingredients.filter((item) => item.name.trim());
+    setChoosingRecipeId(recipe.id);
+    try {
+      const saved = await saveChosenRecipe(currentUserName, recipe);
+      setRecentRecipes(saved);
+      setAnalysisResult((prev) => (prev ? { ...prev, recipes: [] } : prev));
+
+      try {
+        await logIngredientUsage(currentUserName, usedIngredients);
+      } catch (usageError: unknown) {
+        console.error("Error saving ingredient usage:", usageError);
+        const message = getErrorMessage(usageError, t("unknownError"));
+        alert(`${t("usageSaveError")}: ${translateAuthError(message, t)}`);
+      }
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, t("unknownError"));
+      if (isMissingSavedRecipesTableError(message)) {
+        alert(`${t("recipeSaveError")}\n\n${message}`);
+      } else {
+        alert(`${t("recipeSaveError")}: ${translateAuthError(message, t)}`);
+      }
+    } finally {
+      setChoosingRecipeId(null);
+    }
+  };
+
   const analyzeImageAndGetRecipe = async () => {
     if (!GetImage) {
       alert(t("takePhotoFirst"));
@@ -131,6 +196,7 @@ function App() {
 
     setIsAnalyzing(true);
     setAnalysisResult(null);
+    setAnalysisError("");
 
     try {
       const result = await analyzeIngredients(GetImage, language);
@@ -138,7 +204,8 @@ function App() {
       setIngredients(result.ingredients);
     } catch (err: unknown) {
       console.error("Error analyzing image:", err);
-      alert(`${t("errorAnalyzing")}: ${getAnalysisErrorMessage(err)}`);
+      const message = getAnalysisErrorMessage(err);
+      setAnalysisError(`${t("errorAnalyzing")}: ${message}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -168,9 +235,6 @@ function App() {
   if (!hasEnteredDashboard) {
     return (
       <div className="relative flex min-h-screen items-center justify-center px-4">
-        <div className="absolute top-4 end-4">
-          <LanguageToggle />
-        </div>
         <section className="snap-card flex w-full max-w-md flex-col p-6">
           <img
             src={snapchefLogo}
@@ -215,6 +279,10 @@ function App() {
                   {isSubmitting ? t("creatingAccount") : t("signUp")}
                 </button>
 
+                {authError ? (
+                  <p className="text-center text-sm font-medium text-red-700">{authError}</p>
+                ) : null}
+
                 <button
                   type="button"
                   onClick={() => { if (!isSubmitting) setIsRegistering(false); }}
@@ -225,84 +293,58 @@ function App() {
               </div>
             </form>
           ) : (
-            <>
-              {!showFields ? (
-                <div className="flex flex-col gap-4 text-center">
-                  <p className="text-sm text-[var(--snap-text-muted)]">{t("signInPrompt")}</p>
-                  <button type="button" onClick={() => setShowFields(true)} className="snap-btn-primary mt-2">
-                    {t("signIn")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDemoLogin}
-                    disabled={isSubmitting}
-                    className="snap-btn-secondary"
-                  >
-                    {isSubmitting ? t("entering") : t("continueAsDemo")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsRegistering(true)}
-                    className="text-sm text-[var(--snap-accent-mid)] hover:underline font-medium mt-2 block mx-auto"
-                  >
-                    {t("noAccountRegister")}
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleLogin} className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--snap-text-muted)]">{t("emailAddress")}</label>
-                    <input
-                      type="email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="your@email.com"
-                      className="snap-input mt-2"
-                      required
-                    />
-                  </div>
+            <form onSubmit={handleLogin} className="flex flex-col gap-4 animate-in fade-in duration-300">
+              <p className="text-sm text-[var(--snap-text-muted)] text-center">{t("signInPrompt")}</p>
 
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--snap-text-muted)]">{t("password")}</label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t("password")}
-                      className="snap-input mt-2"
-                      required
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--snap-text-muted)]">{t("username")}</label>
+                <input
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder={t("username")}
+                  autoComplete="username"
+                  className="snap-input mt-2"
+                  required
+                />
+              </div>
 
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || !loginEmail.trim() || !password.trim()}
-                    className="snap-btn-primary mt-2"
-                  >
-                    {isSubmitting ? t("connecting") : t("enterSnapChef")}
-                  </button>
+              <div>
+                <label className="block text-sm font-medium text-[var(--snap-text-muted)]">{t("password")}</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={t("password")}
+                  autoComplete="current-password"
+                  className="snap-input mt-2"
+                  required
+                />
+              </div>
 
-                  <div className="flex flex-col gap-2 mt-2 text-center">
-                    <button
-                      type="button"
-                      onClick={() => setShowFields(false)}
-                      className="text-xs text-[var(--snap-accent-mid)] underline opacity-70 block mx-auto"
-                    >
-                      {t("goBack")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsRegistering(true)}
-                      className="text-xs text-[var(--snap-accent-mid)] hover:underline font-medium block mx-auto"
-                    >
-                      {t("needAccountRegister")}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </>
+              <button
+                type="submit"
+                disabled={isSubmitting || !loginUsername.trim() || !password.trim()}
+                className="snap-btn-primary mt-2"
+              >
+                {isSubmitting ? t("connecting") : t("signIn")}
+              </button>
+
+              {authError ? (
+                <p className="text-center text-sm font-medium text-red-700">{authError}</p>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => { if (!isSubmitting) setIsRegistering(true); }}
+                className="text-sm text-[var(--snap-accent-mid)] hover:underline font-medium mt-2 block mx-auto"
+              >
+                {t("noAccountRegister")}
+              </button>
+            </form>
           )}
-        </section>      </div>
+        </section>
+      </div>
     );
   }
 
@@ -310,9 +352,49 @@ function App() {
 
   return (
     <div className="w-full px-4 pb-8 pt-6 sm:px-8">
-      <Navbar userName={currentUserName} onLogout={handleLogout} />
+      <Navbar
+        userName={currentUserName}
+        onNavigateHome={() => setCurrentPage("home")}
+      />
+
+      <div className="mx-auto mt-3 flex w-full max-w-5xl items-center">
+        {currentPage === "stats" ? (
+          <button
+            type="button"
+            onClick={() => setCurrentPage("home")}
+            className="snap-btn-secondary !w-auto !px-3 !py-1.5 !text-sm"
+            aria-label={t("goBack")}
+          >
+            <ArrowLeft size={16} className="rtl:rotate-180" />
+            {t("goBack")}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCurrentPage("stats")}
+            className="snap-btn-secondary !w-auto !px-3 !py-1.5 !text-sm"
+            aria-label={t("statistics")}
+          >
+            <BarChart3 size={16} />
+            {t("statistics")}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="ms-auto snap-btn-secondary !w-auto !px-3 !py-1.5 !text-sm"
+          aria-label={t("logout")}
+        >
+          <LogOut size={16} />
+          {t("logout")}
+        </button>
+      </div>
 
       <main className="mx-auto mt-6 w-full max-w-5xl space-y-8">
+        {currentPage === "stats" ? (
+          <StatisticsPage username={currentUserName} />
+        ) : (
+          <>
         <StepIndicator
           activeStep={activeStep}
           hasPhoto={Boolean(GetImage)}
@@ -320,6 +402,16 @@ function App() {
         />
 
         <section className="mx-auto flex w-full max-w-lg flex-col gap-4">
+          {!analysisResult && !isAnalyzing && !GetImage && (
+            <div className="snap-card-surface p-6 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--snap-primary)] text-[var(--snap-accent-mid)]">
+                <Sparkles size={22} />
+              </div>
+              <h2 className="text-lg font-semibold">{t("emptyStateTitle")}</h2>
+              <p className="mt-2 text-sm text-[var(--snap-text-muted)]">{t("emptyStateHint")}</p>
+            </div>
+          )}
+
           {GetImage ? (
             <PhotoPreview imageUrl={GetImage} onRetake={() => setImage(null)} />
           ) : (
@@ -327,7 +419,8 @@ function App() {
           )}
 
           <button
-            onClick={analyzeImageAndGetRecipe}
+            type="button"
+            onClick={() => void analyzeImageAndGetRecipe()}
             disabled={isAnalyzing || !GetImage}
             className="snap-btn-primary py-3.5 text-base"
           >
@@ -340,17 +433,13 @@ function App() {
               t("analyzeIngredients")
             )}
           </button>
-        </section>
 
-        {!analysisResult && !isAnalyzing && !GetImage && (
-          <section className="snap-card-surface mx-auto max-w-lg p-6 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--snap-primary)] text-[var(--snap-accent-mid)]">
-              <Sparkles size={22} />
-            </div>
-            <h2 className="text-lg font-semibold">{t("emptyStateTitle")}</h2>
-            <p className="mt-2 text-sm text-[var(--snap-text-muted)]">{t("emptyStateHint")}</p>
-          </section>
-        )}
+          {analysisError ? (
+            <p className="text-center text-sm font-medium text-red-700">{analysisError}</p>
+          ) : null}
+
+          <RecentRecipes recipes={recentRecipes} />
+        </section>
 
         {analysisResult && (
           <section className="grid gap-6 text-start md:grid-cols-2">
@@ -361,19 +450,35 @@ function App() {
               isSearching={isSearchingRecipes}
             />
 
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-lg font-semibold">{t("recipeIdeas")}</h2>
-                <p className="text-sm text-[var(--snap-text-muted)]">
-                  {t("dishesYouCanMake", { count: analysisResult.recipes.length })}
-                </p>
-              </div>
+            {analysisResult.recipes.length > 0 ? (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold">{t("recipeIdeas")}</h2>
+                  <p className="text-sm text-[var(--snap-text-muted)]">
+                    {t("dishesYouCanMake", { count: analysisResult.recipes.length })}
+                  </p>
+                </div>
 
-              {analysisResult.recipes.map((recipe, index) => (
-                <RecipeCard key={recipe.id} recipe={recipe} index={index} />
-              ))}
-            </div>
+                {analysisResult.recipes.map((recipe, index) => (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    index={index}
+                    showChoose
+                    onChoose={handleChooseRecipe}
+                    isChoosing={choosingRecipeId === recipe.id}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="snap-card-surface p-5 text-center">
+                <h2 className="text-lg font-semibold">{t("recipeSaved")}</h2>
+                <p className="mt-2 text-sm text-[var(--snap-text-muted)]">{t("recipeMovedToRecent")}</p>
+              </div>
+            )}
           </section>
+        )}
+          </>
         )}
       </main>
     </div>

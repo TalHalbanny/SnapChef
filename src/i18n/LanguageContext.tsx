@@ -1,49 +1,26 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import {
-  translate,
-  type Language,
-  type TranslationKey,
-} from "./translations";
-
-const STORAGE_KEY = "snapchef_language";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { translate, type Language, type TranslationKey } from "./translations";
 
 type LanguageContextValue = {
   language: Language;
-  setLanguage: (language: Language) => void;
-  toggleLanguage: () => void;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 };
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
-
-function getInitialLanguage(): Language {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "en" || stored === "he") return stored;
-  return "he";
-}
+const language: Language = "he";
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(getInitialLanguage);
-
-  const setLanguage = (next: Language) => {
-    setLanguageState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-  };
-
-  const toggleLanguage = () => {
-    setLanguage(language === "en" ? "he" : "en");
-  };
-
   const t = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(language, key, params);
 
   useEffect(() => {
-    document.documentElement.lang = language;
-    document.documentElement.dir = language === "he" ? "rtl" : "ltr";
-  }, [language]);
+    document.documentElement.lang = "he";
+    document.documentElement.dir = "rtl";
+    localStorage.removeItem("snapchef_language");
+  }, []);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, toggleLanguage, t }}>
+    <LanguageContext.Provider value={{ language, t }}>
       {children}
     </LanguageContext.Provider>
   );

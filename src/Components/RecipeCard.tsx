@@ -6,6 +6,10 @@ import { useLanguage } from "../i18n/LanguageContext";
 type RecipeCardProps = {
   recipe: RecipeOption;
   index: number;
+  onChoose?: (recipe: RecipeOption) => void;
+  isChoosing?: boolean;
+  showChoose?: boolean;
+  showOption?: boolean;
 };
 
 function NutritionRow({ label, value, unit }: { label: string; value: number; unit: string }) {
@@ -20,7 +24,14 @@ function NutritionRow({ label, value, unit }: { label: string; value: number; un
   );
 }
 
-export function RecipeCard({ recipe, index }: RecipeCardProps) {
+export function RecipeCard({
+  recipe,
+  index,
+  onChoose,
+  isChoosing = false,
+  showChoose = false,
+  showOption = true,
+}: RecipeCardProps) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useLanguage();
 
@@ -31,10 +42,14 @@ export function RecipeCard({ recipe, index }: RecipeCardProps) {
       <div className="border-b border-[var(--snap-border)] bg-[var(--snap-primary)]/40 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <span className="snap-chip">
-              {t("option")} {index + 1}
-            </span>
-            <h3 className="mt-2 text-lg font-semibold text-[var(--snap-text)]">{recipe.title}</h3>
+            {showOption ? (
+              <span className="snap-chip">
+                {t("option")} {index + 1}
+              </span>
+            ) : null}
+            <h3 className={`${showOption ? "mt-2" : ""} text-lg font-semibold text-[var(--snap-text)]`}>
+              {recipe.title}
+            </h3>
             <p className="mt-1 text-sm text-[var(--snap-text-muted)]">{recipe.description}</p>
           </div>
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-[var(--snap-text-muted)]">
@@ -56,6 +71,17 @@ export function RecipeCard({ recipe, index }: RecipeCardProps) {
         <p className="mt-3 text-xs text-[var(--snap-text-muted)]">
           {t("perServing")} · {recipe.servings} {servingLabel}
         </p>
+
+        {showChoose ? (
+          <button
+            type="button"
+            onClick={() => onChoose?.(recipe)}
+            disabled={isChoosing}
+            className="snap-btn-primary mt-4"
+          >
+            {isChoosing ? t("savingRecipe") : t("chooseRecipe")}
+          </button>
+        ) : null}
 
         <button
           type="button"
