@@ -1,0 +1,12 @@
+specVersion: "v1alpha"
+serviceId: "snapchef-service"
+location: "us-central1"
+schema:
+  source: "./schema"
+datasource:
+  postgresql:
+    database: "snapchef_db"
+    cloudSql:
+      instanceId: "snapchef-postgresql-instance"
+connectorDirs:
+  - "./connector"

@@ -6,9 +6,8 @@ const DEFAULT_MODEL = "gemini-3.6-flash";
 
 const FALLBACK_MODELS = [
   "gemini-3.6-flash",
-  "gemini-2.0-flash",
-  "gemini-flash-latest",
-  "gemini-2.5-flash",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash-lite",
 ] as const;
 
 function getApiKey() {
@@ -39,7 +38,9 @@ function createModel(modelName: string) {
 
 function isRetryableModelError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /429|quota|RESOURCE_EXHAUSTED|404|NOT_FOUND|no longer available|not found/i.test(message);
+  return /429|quota|RESOURCE_EXHAUSTED|404|NOT_FOUND|no longer available|not found|503|UNAVAILABLE|high demand|try again later|timed out/i.test(
+    message,
+  );
 }
 
 export function isGeminiQuotaError(error: unknown) {
@@ -47,7 +48,12 @@ export function isGeminiQuotaError(error: unknown) {
   return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
 }
 
-const REQUEST_TIMEOUT_MS = 45000;
+export function isGeminiUnavailableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /503|UNAVAILABLE|high demand|try again later/i.test(message);
+}
+
+const REQUEST_TIMEOUT_MS = 20000;
 
 function withTimeout<T>(promise: Promise<T>, message: string) {
   return new Promise<T>((resolve, reject) => {
@@ -357,7 +363,10 @@ export async function analyzeIngredients(
     return getMockAnalysis(language);
   }
 
-  const preparedImage = await compressImageDataUrl(imageDataUrl);
+  const preparedImage = await withTimeout(
+    compressImageDataUrl(imageDataUrl),
+    "Image preparation timed out. Try a smaller photo.",
+  ).catch(() => imageDataUrl);
   const base64Data = preparedImage.split(",")[1];
   if (!base64Data) {
     throw new Error("Invalid image data");

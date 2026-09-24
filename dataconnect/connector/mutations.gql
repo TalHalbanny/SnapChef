@@ -1,0 +1,33 @@
+mutation CreateUser($username: String!, $email: String!, $password: String!)
+@auth(level: PUBLIC, insecureReason: "SnapChef registration creates a user profile.") {
+  user_insert(data: { username: $username, email: $email, password: $password })
+}
+
+mutation CreateRecipe($title: String!, $instructions: String!, $imageUrl: String, $chefId: UUID!)
+@auth(level: PUBLIC, insecureReason: "SnapChef saves a chosen recipe for the chef.") {
+  recipe_insert(
+    data: {
+      title: $title
+      instructions: $instructions
+      imageUrl: $imageUrl
+      chef: { id: $chefId }
+    }
+  )
+}
+
+mutation DeleteRecipe($id: UUID!)
+@auth(level: PUBLIC, insecureReason: "SnapChef keeps only the last few chosen recipes.") {
+  recipe_delete(id: $id)
+}
+
+mutation CreateReview($userId: UUID!, $recipeId: UUID!, $rating: Int!, $comment: String)
+@auth(level: PUBLIC, insecureReason: "SnapChef can attach a review to a chosen recipe.") {
+  review_insert(
+    data: {
+      user: { id: $userId }
+      recipe: { id: $recipeId }
+      rating: $rating
+      comment: $comment
+    }
+  )
+}

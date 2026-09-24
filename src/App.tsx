@@ -13,6 +13,7 @@ import { authService } from "./auth_util";
 import {
   analyzeIngredients,
   isGeminiQuotaError,
+  isGeminiUnavailableError,
   searchRecipesFromIngredients,
 } from "./services/ingredientAnalysis";
 import { logIngredientUsage } from "./services/ingredientStats";
@@ -39,9 +40,19 @@ function translateAuthError(message: string, t: ReturnType<typeof useLanguage>["
   if (message.includes("Invalid email") || message.includes("Invalid username")) {
     return t("invalidCredentials");
   }
-  if (message.includes("Missing Supabase")) return t("missingSupabaseConfig");
-  if (message.includes("row-level security") || message.includes("42501")) {
+  if (message.includes("Missing Firebase") || message.includes("Missing Supabase")) {
+    return t("missingFirebaseConfig");
+  }
+  if (
+    message.includes("row-level security") ||
+    message.includes("42501") ||
+    message.includes("permission-denied") ||
+    message.includes("Missing or insufficient permissions")
+  ) {
     return t("rlsBlocked");
+  }
+  if (/failed to fetch|networkerror|load failed|err_name_not_resolved/i.test(message)) {
+    return t("firebaseUnreachable");
   }
   return message;
 }
@@ -155,6 +166,9 @@ function App() {
   const getAnalysisErrorMessage = (err: unknown) => {
     if (isGeminiQuotaError(err)) {
       return t("quotaExceeded");
+    }
+    if (isGeminiUnavailableError(err)) {
+      return t("geminiUnavailable");
     }
     return err instanceof Error ? err.message : t("unknownError");
   };
@@ -437,8 +451,6 @@ function App() {
           {analysisError ? (
             <p className="text-center text-sm font-medium text-red-700">{analysisError}</p>
           ) : null}
-
-          <RecentRecipes recipes={recentRecipes} />
         </section>
 
         {analysisResult && (
@@ -478,6 +490,8 @@ function App() {
             )}
           </section>
         )}
+
+        <RecentRecipes recipes={recentRecipes} />
           </>
         )}
       </main>

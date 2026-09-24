@@ -1,0 +1,38 @@
+query GetUserByUsername($username: String!)
+@auth(level: PUBLIC, insecureReason: "SnapChef login looks up users by username.") {
+  users(where: { username: { eq: $username } }) {
+    id
+    username
+    email
+    password
+  }
+}
+
+query GetUserByEmail($email: String!)
+@auth(level: PUBLIC, insecureReason: "SnapChef login looks up users by email.") {
+  users(where: { email: { eq: $email } }) {
+    id
+    username
+    email
+    password
+  }
+}
+
+query ListRecentRecipes($username: String!)
+@auth(level: PUBLIC, insecureReason: "SnapChef shows the last recipes a chef chose.") {
+  recipes(
+    where: { chef: { username: { eq: $username } } }
+    orderBy: [{ createdAt: DESC }]
+    limit: 10
+  ) {
+    id
+    title
+    instructions
+    imageUrl
+    createdAt
+    chef {
+      id
+      username
+    }
+  }
+}

@@ -2,10 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { BarChart3, ChefHat } from "lucide-react";
 import { useLanguage } from "../i18n/LanguageContext";
 import {
-  INGREDIENT_USAGE_SETUP_SQL,
   aggregateIngredientStats,
   fetchIngredientUsage,
-  isMissingUsageTableError,
   type IngredientStat,
 } from "../services/ingredientStats";
 
@@ -71,7 +69,6 @@ export function StatisticsPage({ username }: StatisticsPageProps) {
   const { t, language } = useLanguage();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [needsSetup, setNeedsSetup] = useState(false);
   const [recordCount, setRecordCount] = useState(0);
   const [stats, setStats] = useState<IngredientStat[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
@@ -82,7 +79,6 @@ export function StatisticsPage({ username }: StatisticsPageProps) {
     async function load() {
       setIsLoading(true);
       setError("");
-      setNeedsSetup(false);
 
       try {
         const rows = await fetchIngredientUsage(username);
@@ -94,7 +90,6 @@ export function StatisticsPage({ username }: StatisticsPageProps) {
       } catch (err: unknown) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : t("unknownError");
-        setNeedsSetup(isMissingUsageTableError(message));
         setError(message);
         setRecordCount(0);
         setStats([]);
@@ -133,11 +128,6 @@ export function StatisticsPage({ username }: StatisticsPageProps) {
         <div className="snap-card-surface space-y-3 p-6">
           <p className="text-sm font-medium text-red-700">{t("statisticsLoadError")}</p>
           <p className="text-sm text-[var(--snap-text-muted)]">{error}</p>
-          {needsSetup ? (
-            <pre className="overflow-x-auto rounded-xl bg-[var(--snap-bg)] p-3 text-start text-xs text-[var(--snap-text)]">
-              {INGREDIENT_USAGE_SETUP_SQL}
-            </pre>
-          ) : null}
         </div>
       ) : null}
 

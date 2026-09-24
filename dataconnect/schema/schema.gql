@@ -1,0 +1,22 @@
+type User @table {
+  id: UUID! @default(expr: "uuidV4()")
+  username: String! @unique
+  email: String! @unique
+  password: String!
+}
+
+type Recipe @table {
+  id: UUID! @default(expr: "uuidV4()")
+  title: String!
+  instructions: String!
+  imageUrl: String
+  createdAt: Date! @default(expr: "request.time")
+  chef: User!
+}
+
+type Review @table(key: ["recipe", "user"]) {
+  user: User!
+  recipe: Recipe!
+  rating: Int!
+  comment: String
+}

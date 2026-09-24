@@ -1,29 +1,22 @@
-import { getSupabase } from "../auth_util";
-import { getLocalList, isWriteBlockedError, setLocalList } from "./localUserStore";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  where,
+} from "firebase/firestore";
+import { getRemoteUser } from "../auth_util";
+import { COLLECTIONS, getDb, isFirebaseConfigured } from "../firebase";
+import { getLocalList, setLocalList } from "./localUserStore";
 import type { RecipeOption } from "../types/recipe";
 
-export const SAVED_RECIPES_TABLE = "saved_recipes";
 export const MAX_SAVED_RECIPES = 3;
 
-export const SAVED_RECIPES_SETUP_SQL = `create table if not exists public.saved_recipes (
-  id bigint generated always as identity primary key,
-  username text not null,
-  recipe_title text not null,
-  recipe_description text not null default '',
-  prep_time text not null default '',
-  servings int not null default 1,
-  steps jsonb not null default '[]'::jsonb,
-  nutrition jsonb not null default '{}'::jsonb,
-  chosen_at timestamptz not null default now()
-);
-
-create index if not exists saved_recipes_username_chosen_at_idx
-  on public.saved_recipes (username, chosen_at desc);
-
-alter table public.saved_recipes disable row level security;`;
-
 export type SavedRecipeRow = {
-  id: number;
+  id: string;
   username: string;
   recipe_title: string;
   recipe_description: string;
@@ -34,20 +27,8 @@ export type SavedRecipeRow = {
   chosen_at: string;
 };
 
-export function isMissingSavedRecipesTableError(message: string) {
-  return (
-    message.includes("saved_recipes") &&
-    (message.includes("schema cache") ||
-      message.includes("does not exist") ||
-      message.includes("Could not find the table"))
-  );
-}
-
-function parseSteps(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((step): step is string => typeof step === "string");
-  }
-  return [];
+function emptyNutrition(): RecipeOption["nutrition"] {
+  return { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
 }
 
 function parseNutrition(value: unknown): RecipeOption["nutrition"] {
@@ -61,18 +42,39 @@ function parseNutrition(value: unknown): RecipeOption["nutrition"] {
   };
 }
 
-function mapRow(row: Record<string, unknown>): SavedRecipeRow {
+function parseSteps(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((step): step is string => typeof step === "string");
+  }
+  return [];
+}
+
+function toIsoDate(value: unknown) {
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return new Date().toISOString();
+}
+
+function mapRecipeDoc(id: string, data: Record<string, unknown>, fallbackUsername: string): SavedRecipeRow {
   return {
-    id: Number(row.id),
-    username: String(row.username ?? ""),
-    recipe_title: String(row.recipe_title ?? ""),
-    recipe_description: String(row.recipe_description ?? ""),
-    prep_time: String(row.prep_time ?? ""),
-    servings: Number(row.servings) || 1,
-    steps: parseSteps(row.steps),
-    nutrition: parseNutrition(row.nutrition),
-    chosen_at: String(row.chosen_at ?? ""),
+    id,
+    username: String(data.chefUsername ?? fallbackUsername),
+    recipe_title: String(data.title ?? ""),
+    recipe_description: String(data.description ?? ""),
+    prep_time: String(data.prepTime ?? ""),
+    servings: Number(data.servings) || 1,
+    steps: parseSteps(data.steps),
+    nutrition: parseNutrition(data.nutrition) || emptyNutrition(),
+    chosen_at: toIsoDate(data.createdAt),
   };
+}
+
+export function isMissingSavedRecipesTableError(message: string) {
+  return message.includes("recipes") && (message.includes("permission") || message.includes("not found"));
 }
 
 export function savedRecipeToOption(row: SavedRecipeRow): RecipeOption {
@@ -87,37 +89,9 @@ export function savedRecipeToOption(row: SavedRecipeRow): RecipeOption {
   };
 }
 
-export async function fetchRecentSavedRecipes(username: string): Promise<SavedRecipeRow[]> {
-  const user = username.trim();
-
-  try {
-    const { data, error } = await getSupabase()
-      .from(SAVED_RECIPES_TABLE)
-      .select("*")
-      .eq("username", user)
-      .order("chosen_at", { ascending: false })
-      .limit(MAX_SAVED_RECIPES);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (data && data.length > 0) {
-      return data.map((row) => mapRow(row as Record<string, unknown>));
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!isWriteBlockedError(message) && message !== "Missing Supabase configuration") {
-      throw error instanceof Error ? error : new Error(message);
-    }
-  }
-
-  return getLocalList<SavedRecipeRow>("recipes", user).slice(0, MAX_SAVED_RECIPES);
-}
-
 function saveRecipeLocally(user: string, recipe: RecipeOption): SavedRecipeRow[] {
   const row: SavedRecipeRow = {
-    id: Date.now(),
+    id: String(Date.now()),
     username: user,
     recipe_title: recipe.title,
     recipe_description: recipe.description,
@@ -133,56 +107,89 @@ function saveRecipeLocally(user: string, recipe: RecipeOption): SavedRecipeRow[]
   return next;
 }
 
+async function uploadRecipe(user: string, recipe: RecipeOption, chosenAt?: string) {
+  const chef = await getRemoteUser(user);
+  if (!chef) {
+    throw new Error("User not found in Firebase");
+  }
+
+  await addDoc(collection(getDb(), COLLECTIONS.recipes), {
+    title: recipe.title,
+    description: recipe.description,
+    prepTime: recipe.prepTime,
+    servings: recipe.servings,
+    steps: recipe.steps,
+    nutrition: recipe.nutrition,
+    imageUrl: null,
+    chefId: chef.id,
+    chefUsername: chef.username,
+    createdAt: chosenAt ? new Date(chosenAt) : serverTimestamp(),
+  });
+}
+
+async function syncLocalRecipesToFirestore(user: string, existing: SavedRecipeRow[]) {
+  const local = getLocalList<SavedRecipeRow>("recipes", user).map((row) => ({
+    ...row,
+    id: String(row.id),
+  }));
+  if (local.length === 0) {
+    return existing;
+  }
+
+  const remoteTitles = new Set(existing.map((row) => `${row.recipe_title}|${row.chosen_at}`));
+  const missing = local.filter((row) => !remoteTitles.has(`${row.recipe_title}|${row.chosen_at}`));
+  for (const row of missing) {
+    await uploadRecipe(user, savedRecipeToOption(row), row.chosen_at);
+  }
+
+  const next = missing.length > 0 ? await fetchRemoteRecipes(user) : existing;
+  await Promise.all(
+    next.slice(MAX_SAVED_RECIPES).map((row) => deleteDoc(doc(getDb(), COLLECTIONS.recipes, row.id))),
+  );
+  return next.slice(0, MAX_SAVED_RECIPES);
+}
+
+async function fetchRemoteRecipes(user: string): Promise<SavedRecipeRow[]> {
+  const snap = await getDocs(
+    query(collection(getDb(), COLLECTIONS.recipes), where("chefUsername", "==", user)),
+  );
+  return snap.docs
+    .map((item) => mapRecipeDoc(item.id, item.data(), user))
+    .sort((a, b) => (a.chosen_at < b.chosen_at ? 1 : -1));
+}
+
+export async function fetchRecentSavedRecipes(username: string): Promise<SavedRecipeRow[]> {
+  const user = username.trim();
+
+  if (isFirebaseConfigured()) {
+    try {
+      const remote = await fetchRemoteRecipes(user);
+      return await syncLocalRecipesToFirestore(user, remote);
+    } catch (error) {
+      console.error("Error loading recipes from Firestore:", error);
+    }
+  }
+
+  return getLocalList<SavedRecipeRow>("recipes", user)
+    .map((row) => ({ ...row, id: String(row.id) }))
+    .slice(0, MAX_SAVED_RECIPES);
+}
+
 export async function saveChosenRecipe(username: string, recipe: RecipeOption): Promise<SavedRecipeRow[]> {
   const user = username.trim();
   if (!user) {
     throw new Error("Missing username");
   }
 
-  try {
-    const supabase = getSupabase();
-    const { error: insertError } = await supabase.from(SAVED_RECIPES_TABLE).insert({
-      username: user,
-      recipe_title: recipe.title,
-      recipe_description: recipe.description,
-      prep_time: recipe.prepTime,
-      servings: recipe.servings,
-      steps: recipe.steps,
-      nutrition: recipe.nutrition,
-    });
+  if (isFirebaseConfigured()) {
+    await uploadRecipe(user, recipe);
 
-    if (insertError) {
-      throw new Error(insertError.message);
-    }
-
-    const { data: allRows, error: listError } = await supabase
-      .from(SAVED_RECIPES_TABLE)
-      .select("id")
-      .eq("username", user)
-      .order("chosen_at", { ascending: false });
-
-    if (listError) {
-      throw new Error(listError.message);
-    }
-
-    const extraIds = (allRows ?? []).slice(MAX_SAVED_RECIPES).map((row) => row.id);
-    if (extraIds.length > 0) {
-      const { error: deleteError } = await supabase
-        .from(SAVED_RECIPES_TABLE)
-        .delete()
-        .in("id", extraIds);
-
-      if (deleteError) {
-        throw new Error(deleteError.message);
-      }
-    }
-
-    return fetchRecentSavedRecipes(user);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!isWriteBlockedError(message) && message !== "Missing Supabase configuration") {
-      throw error instanceof Error ? error : new Error(message);
-    }
-    return saveRecipeLocally(user, recipe);
+    const saved = await fetchRemoteRecipes(user);
+    await Promise.all(
+      saved.slice(MAX_SAVED_RECIPES).map((row) => deleteDoc(doc(getDb(), COLLECTIONS.recipes, row.id))),
+    );
+    return saved.slice(0, MAX_SAVED_RECIPES);
   }
+
+  return saveRecipeLocally(user, recipe);
 }

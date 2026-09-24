@@ -1,24 +1,10 @@
-import { getSupabase } from "../auth_util";
-import { getLocalList, isWriteBlockedError, setLocalList } from "./localUserStore";
+import { addDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { COLLECTIONS, getDb, isFirebaseConfigured } from "../firebase";
+import { getLocalList, setLocalList } from "./localUserStore";
 import type { Ingredient } from "../types/recipe";
 
-export const INGREDIENT_USAGE_TABLE = "ingredient_usage";
-
-export const INGREDIENT_USAGE_SETUP_SQL = `create table if not exists public.ingredient_usage (
-  id bigint generated always as identity primary key,
-  username text not null,
-  ingredient_name text not null,
-  ingredient_key text not null,
-  used_at timestamptz not null default now()
-);
-
-create index if not exists ingredient_usage_username_used_at_idx
-  on public.ingredient_usage (username, used_at desc);
-
-alter table public.ingredient_usage disable row level security;`;
-
 export type IngredientUsageRow = {
-  id: number;
+  id: string;
   username: string;
   ingredient_name: string;
   ingredient_key: string;
@@ -37,12 +23,17 @@ export function normalizeIngredientKey(name: string) {
 }
 
 export function isMissingUsageTableError(message: string) {
-  return (
-    message.includes("ingredient_usage") &&
-    (message.includes("schema cache") ||
-      message.includes("does not exist") ||
-      message.includes("Could not find the table"))
-  );
+  return message.includes("ingredient_usage");
+}
+
+function toIsoDate(value: unknown) {
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return new Date().toISOString();
 }
 
 export async function logIngredientUsage(username: string, ingredients: Ingredient[]) {
@@ -57,60 +48,75 @@ export async function logIngredientUsage(username: string, ingredients: Ingredie
   if (!user || rows.length === 0) return;
 
   const unique = new Map(rows.map((item) => [item.key, item]));
-  const payload = [...unique.values()].map((item) => ({
+  const now = new Date().toISOString();
+  const payload = [...unique.values()];
+
+  if (isFirebaseConfigured()) {
+    await Promise.all(
+      payload.map((item) =>
+        addDoc(collection(getDb(), COLLECTIONS.ingredientUsage), {
+          username: user,
+          ingredient_name: item.name,
+          ingredient_key: item.key,
+          used_at: serverTimestamp(),
+        }),
+      ),
+    );
+    return;
+  }
+
+  const localRows: IngredientUsageRow[] = payload.map((item, index) => ({
+    id: String(Date.now() + index),
     username: user,
     ingredient_name: item.name,
     ingredient_key: item.key,
+    used_at: now,
   }));
-
-  try {
-    const { error } = await getSupabase().from(INGREDIENT_USAGE_TABLE).insert(payload);
-    if (error) {
-      throw new Error(error.message);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!isWriteBlockedError(message) && message !== "Missing Supabase configuration") {
-      throw error instanceof Error ? error : new Error(message);
-    }
-
-    const now = new Date().toISOString();
-    const localRows: IngredientUsageRow[] = payload.map((item, index) => ({
-      id: Date.now() + index,
-      username: user,
-      ingredient_name: item.ingredient_name,
-      ingredient_key: item.ingredient_key,
-      used_at: now,
-    }));
-    setLocalList("usage", user, [...localRows, ...getLocalList<IngredientUsageRow>("usage", user)]);
-  }
+  setLocalList("usage", user, [...localRows, ...getLocalList<IngredientUsageRow>("usage", user)]);
 }
 
 export async function fetchIngredientUsage(username: string): Promise<IngredientUsageRow[]> {
   const user = username.trim();
 
-  try {
-    const { data, error } = await getSupabase()
-      .from(INGREDIENT_USAGE_TABLE)
-      .select("id, username, ingredient_name, ingredient_key, used_at")
-      .eq("username", user)
-      .order("used_at", { ascending: false });
+  if (isFirebaseConfigured()) {
+    const snap = await getDocs(
+      query(collection(getDb(), COLLECTIONS.ingredientUsage), where("username", "==", user)),
+    );
+    const remote = snap.docs.map((item) => {
+      const data = item.data();
+      return {
+        id: item.id,
+        username: String(data.username ?? user),
+        ingredient_name: String(data.ingredient_name ?? ""),
+        ingredient_key: String(data.ingredient_key ?? ""),
+        used_at: toIsoDate(data.used_at),
+      };
+    });
 
-    if (error) {
-      throw new Error(error.message);
+    const local = getLocalList<IngredientUsageRow>("usage", user);
+    const remoteKeys = new Set(remote.map((row) => `${row.ingredient_key}|${row.used_at}`));
+    const missing = local.filter((row) => !remoteKeys.has(`${row.ingredient_key}|${row.used_at}`));
+    if (missing.length > 0) {
+      await Promise.all(
+        missing.map((row) =>
+          addDoc(collection(getDb(), COLLECTIONS.ingredientUsage), {
+            username: user,
+            ingredient_name: row.ingredient_name,
+            ingredient_key: row.ingredient_key,
+            used_at: row.used_at,
+          }),
+        ),
+      );
+      return fetchIngredientUsage(user);
     }
 
-    if (data && data.length > 0) {
-      return data;
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!isWriteBlockedError(message) && message !== "Missing Supabase configuration") {
-      throw error instanceof Error ? error : new Error(message);
-    }
+    return remote;
   }
 
-  return getLocalList<IngredientUsageRow>("usage", user);
+  return getLocalList<IngredientUsageRow>("usage", user).map((row) => ({
+    ...row,
+    id: String(row.id),
+  }));
 }
 
 export function aggregateIngredientStats(rows: IngredientUsageRow[]): IngredientStat[] {

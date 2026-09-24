@@ -15,9 +15,15 @@ export const translations = {
     username: "Username",
     noAccountRegister: "Don't have an account? Register now",
     missingSupabaseConfig:
-      "Missing Supabase configuration. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to a .env file.",
+      "Missing Firebase configuration. Add VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID, and VITE_FIREBASE_APP_ID to a .env file.",
+    missingFirebaseConfig:
+      "Missing Firebase configuration. Add VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID, and VITE_FIREBASE_APP_ID to a .env file.",
     rlsBlocked:
-      "Supabase blocked the admin user (RLS). Run the SQL in the project SQL Editor, then try again.",
+      "Firestore blocked this write. Create a Firestore database and publish the project rules, then try again.",
+    supabaseUnreachable:
+      "Cannot reach Firestore. Create the database under Databases & Storage > Firestore.",
+    firebaseUnreachable:
+      "Cannot reach Firestore. Create the database under Databases & Storage > Firestore.",
     password: "Password",
     connecting: "Connecting...",
     enterSnapChef: "Enter SnapChef",
@@ -29,6 +35,8 @@ export const translations = {
     errorAnalyzing: "Error analyzing image",
     quotaExceeded:
       "Gemini API quota exceeded. Wait a few minutes or check your usage at ai.google.dev.",
+    geminiUnavailable:
+      "Gemini is busy right now. Wait a few seconds and analyze again.",
     unknownError: "Unknown error",
     photoReady: "Photo captured — ready to analyze",
     analyzeIngredients: "Analyze Ingredients",
@@ -116,9 +124,15 @@ export const translations = {
     username: "שם משתמש",
     noAccountRegister: "אין לכם חשבון? הירשמו עכשיו",
     missingSupabaseConfig:
-      "חסרה הגדרת Supabase. הוסיפו VITE_SUPABASE_URL ו-VITE_SUPABASE_ANON_KEY לקובץ .env.",
+      "חסרה הגדרת Firebase. הוסיפו VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID ו-VITE_FIREBASE_APP_ID לקובץ .env.",
+    missingFirebaseConfig:
+      "חסרה הגדרת Firebase. הוסיפו VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID ו-VITE_FIREBASE_APP_ID לקובץ .env.",
     rlsBlocked:
-      "Supabase חסם את יצירת המשתמש admin (RLS). הריצו את ה-SQL בעורך, ואז נסו שוב.",
+      "Firestore חסם את הכתיבה. צרו מסד Firestore ופרסמו את חוקי הפרויקט, ואז נסו שוב.",
+    supabaseUnreachable:
+      "לא ניתן להתחבר ל-Firestore. צרו את המסד תחת Databases & Storage > Firestore.",
+    firebaseUnreachable:
+      "לא ניתן להתחבר ל-Firestore. צרו את המסד תחת Databases & Storage > Firestore.",
     password: "סיסמה",
     connecting: "מתחבר...",
     enterSnapChef: "כניסה ל-SnapChef",
@@ -130,6 +144,8 @@ export const translations = {
     errorAnalyzing: "שגיאה בניתוח התמונה",
     quotaExceeded:
       "מכסת Gemini API מלאה. המתן כמה דקות או בדוק שימוש ב-ai.google.dev.",
+    geminiUnavailable:
+      "Gemini עמוס כרגע. המתינו כמה שניות ונסו לנתח שוב.",
     unknownError: "שגיאה לא ידועה",
     photoReady: "התמונה נצלמה — מוכנה לניתוח",
     analyzeIngredients: "ניתוח מצרכים",
