@@ -1,73 +1,47 @@
-# React + TypeScript + Vite
+# 👨‍🍳 SnapChef
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**מפתחי התוכנה:** טל חלבני, ויטלי ברלב
 
-Currently, two official plugins are available:
+מערכת חכמה המציעה למשתמש מתכונים מותאמים אישית לפי תמונה או צילום ישיר של מצרכים במכשיר הפלאפון, שומרת מתכונים אחרונים ומבצעת ניתוח סטטיסטי של שימוש במצרכים.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## תמונות מהתוכנית
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### העלאת תמונה
+מסך העלאת הצילום או התמונה של המצרכים למערכת.
 
-## Expanding the ESLint configuration
+![העלאת תמונה](./uploadpic.jpg)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### זיהוי מצרכים
+מערכת הניתוח מזהה את הפריטים מהתמונה ומאפשרת עריכה של שמות או כמיות המצרכים.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+![זיהוי מצרכים](./ingridident.png)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### הצגת מתכון וערכים תזונתיים
+מתכון מפורט הכולל שלבי הכנה, זמן הכנה ופירוט קלוריות וערכים תזונתיים למנה.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+![תצוגת מתכון](./recipe.png)
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### אזור סטטיסטיקה
+לוח בקרה המציג את המצרך האחרון ששימש לבקשת מתכון, רשימת המצרכים בשימוש אחרוני, והשוואת כמויות בגרף.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+![סטטיסטיקה](./stats.png)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
+
+## מאפיינים וכלים בתוכנית
+
+* **כניסת משתמשים מאובטחת:** התוכנית מאפשרת כניסה מאובטחת לפרופיל באמצעות שם משתמש וסיסמה.
+* **כפתור סטטיסטיקה:** מאפשר להיכנס לאזור הסטטיסטיקה של התוכנית המציג את המצרך האחרון שמשתמש בדק עבורו מתכון, יחד עם שאר המצרכים וכמות הפעמים שנבדקו בתצוגת גרף.
+* **פירוט קלוריות למנה:** כל מתכון מגיע עם ערכים תזונתיים וקלוריות מדויקים.
+* **מתכונים אחרונים:** למשתמש מוצגים מתכונים אחרונים בהם בחר מתוך המצרכים שהציג למערכת.
+* **ניתוח תצלום או תמונה למציאת מתכון:** ניתוח מתקדם באמצעות בינה מלאכותית (GEMINI FLASH) למציאת מתכון המבוסס על המצרכים המופיעים בתמונה.
+
+---
+
+## התקנה ודרישות
+
+* נדרש מחשב או מכשיר נייד עם חיבור יציב לאינטרנט.
+* נדרשת הרשמה לשימוש וכניסה למערכת.
+* לחוויית משתמש טובה יותר מומלץ להשתמש במכשיר עם מצלמה (אך אינו חובה).
